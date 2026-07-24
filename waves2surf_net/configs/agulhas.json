@@ -1,0 +1,73 @@
+{
+  "data": {
+    "sources": {
+      "waves": {
+        "dir": "/home/datawork-WW3/PROJECT/AMPHITRITE/BASELINES/MFWAM",
+        "layout": "daily_tree",
+        "variables": ["VHM0", "VTM10", "VMDR"],
+        "time_variable": "time"
+      },
+      "currents": {
+        "dir": "/home/datawork-WW3/FORCING/MERCA_GLOB_PHY_FOR/NC4",
+        "layout": "yearly_nc",
+        "file_pattern": "cur_{year}.nc",
+        "variables": ["uo", "vo"],
+        "time_variable": "time",
+        "depth_index": 0
+      }
+    },
+    "input_variables": ["VHM0", "VTM10", "VMDR"],
+    "target_variables": ["uo", "vo"],
+    "calendar_features": ["year_sin", "year_cos"],
+    "bbox": {
+      "lon_min": 10.0,
+      "lon_max": 35.0,
+      "lat_min": -45.0,
+      "lat_max": -35.0
+    },
+    "match_tolerance_hours": 3.0,
+    "dx": 10000.0,
+    "dy": 10000.0,
+    "splits": {
+      "train": {"start": "20230101", "end": "20231231"},
+      "validation": {"start": "20240501", "end": "20240731"},
+      "test": {"start": "20240801", "end": "20241231"}
+    },
+    "normalization": {
+      "input": {
+        "mean": [0.0, 0.0, 0.0],
+        "std": [1.0, 1.0, 1.0]
+      },
+      "metadata": {
+        "mean": [0.0, 0.0],
+        "std": [0.7071, 0.7071]
+      },
+      "target": {
+        "mean": [0.0, 0.0],
+        "std": [1.0, 1.0]
+      }
+    }
+  },
+  "model": {
+    "base_channels": 8,
+    "normalization": "group",
+    "conditioning": "broadcast",
+    "metadata_channels": 4,
+    "metadata_width": 32
+  },
+  "training": {
+    "device": "cuda",
+    "epochs": 50,
+    "batch_size": 16,
+    "num_workers": 4,
+    "learning_rate": 0.001,
+    "weight_decay": 0.00001,
+    "gradient_clip": 1.0,
+    "seed": 42,
+    "loss_weights": {
+      "pointwise": 1.0,
+      "spectral": 0.0,
+      "gradient": 0.0
+    }
+  }
+}

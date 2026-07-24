@@ -20,6 +20,7 @@ from .data import ChannelStats, NetCDFFieldDataset
 from .losses import gradient_loss, masked_l1, spectral_loss
 from .metrics import RegressionMetrics
 from .model import Waves2SurfNet
+from .wavecurrentdataset import WaveCurrentDataset
 
 
 def seed_everything(seed: int) -> None:
@@ -42,14 +43,29 @@ def _stats(config: dict[str, Any], name: str) -> ChannelStats | None:
     return ChannelStats.from_dict(value) if value else None
 
 
-def make_dataset(config: dict[str, Any], split: str) -> NetCDFFieldDataset:
+def make_dataset(
+    config: dict[str, Any], split: str
+) -> NetCDFFieldDataset | WaveCurrentDataset:
     """Build a dataset for ``train``, ``validation``, or ``test``.
 
-    All splits share variables and normalization; only their time indices
-    differ. Index lists may live directly in JSON or in ``.npy`` files when
-    they are too large for a readable configuration.
+    Dual-source configs (``data.sources``) use :class:`WaveCurrentDataset`
+    with date-range splits. Single-file configs (``data.path``) keep the
+    original :class:`NetCDFFieldDataset` and index-list / ``.npy`` splits.
     """
     data = config["data"]
+    input_stats = _stats(config, "input")
+    metadata_stats = _stats(config, "metadata")
+    target_stats = _stats(config, "target")
+
+    if "sources" in data:
+        return WaveCurrentDataset.from_config(
+            config,
+            split,
+            input_stats=input_stats,
+            metadata_stats=metadata_stats,
+            target_stats=target_stats,
+        )
+
     split_value = data["splits"][split]
     if isinstance(split_value, str):
         indices = np.load(split_value).tolist()
@@ -65,9 +81,9 @@ def make_dataset(config: dict[str, Any], split: str) -> NetCDFFieldDataset:
         calendar_features=data.get("calendar_features", []),
         valid_mask_variable=data.get("valid_mask_variable"),
         spatial_slice=data.get("spatial_slice"),
-        input_stats=_stats(config, "input"),
-        metadata_stats=_stats(config, "metadata"),
-        target_stats=_stats(config, "target"),
+        input_stats=input_stats,
+        metadata_stats=metadata_stats,
+        target_stats=target_stats,
     )
 
 
