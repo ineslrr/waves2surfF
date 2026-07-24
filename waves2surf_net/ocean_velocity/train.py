@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from .data import ChannelStats, NetCDFFieldDataset
 from .losses import gradient_loss, masked_l1, spectral_loss
 from .metrics import RegressionMetrics
-from .model import UNet
+from .model import Waves2SurfNet
 
 
 def seed_everything(seed: int) -> None:
@@ -71,8 +71,8 @@ def make_dataset(config: dict[str, Any], split: str) -> NetCDFFieldDataset:
     )
 
 
-def make_model(config: dict[str, Any]) -> UNet:
-    """Construct a U-Net whose channel counts match the configured variables."""
+def make_model(config: dict[str, Any]) -> Waves2SurfNet:
+    """Construct Waves2SurfNet with channels matching configured variables."""
     data = config["data"]
     model = config["model"]
     # File-based metadata and derived calendar values are concatenated by the
@@ -80,7 +80,7 @@ def make_model(config: dict[str, Any]) -> UNet:
     metadata_dim = len(data.get("metadata_variables", [])) + len(
         data.get("calendar_features", [])
     )
-    return UNet(
+    return Waves2SurfNet(
         len(data["input_variables"]),
         len(data["target_variables"]),
         model["base_channels"],

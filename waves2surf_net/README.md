@@ -6,9 +6,9 @@ A small, portable PyTorch project for learning
 2-D ocean fields + metadata → surface u, v
 ```
 
-The default model is a four-level U-Net derived from the final GOFLOW
-architecture, reduced to base width 8 and generalized to arbitrary named input
-channels.
+The model is called **Waves2SurfNet**. It uses a four-level U-Net backbone
+derived from GOFLOW, reduced to base width 8 and generalized to arbitrary named
+input channels and metadata conditioning.
 
 ## Data
 
@@ -126,7 +126,7 @@ values such as mean wind, calendar encodings, or mean temperature belong in
 
 ```text
 ocean_velocity/
-  model.py       compact U-Net
+  model.py       Waves2SurfNet architecture and U-Net building blocks
   data.py        worker-safe NetCDF dataset
   losses.py      masked, spectral, and derivative losses
   metrics.py     streaming regression metrics

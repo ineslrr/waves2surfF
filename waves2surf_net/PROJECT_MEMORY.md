@@ -34,6 +34,8 @@ and the pretrained checkpoint.
 
 ## Current design decisions
 
+- The public architecture name is `Waves2SurfNet`; it retains a U-Net backbone
+  and keeps `UNet` as a compatibility alias for early notebooks.
 - `base_channels=8` is the lightweight default.
 - Group normalization replaces input/batch normalization, making training
   less dependent on per-device batch size.

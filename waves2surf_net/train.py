@@ -19,7 +19,7 @@ from ocean_velocity.train import run_training
 def main() -> None:
     """Parse user inputs, validate the config, and start training."""
     parser = argparse.ArgumentParser(
-        description="Train a U-Net to predict 2-D surface velocity fields."
+        description="Train Waves2SurfNet to predict 2-D surface velocity fields."
     )
     parser.add_argument("--config", required=True, help="Path to a JSON configuration")
     parser.add_argument("--output-dir", required=True, help="Experiment output directory")

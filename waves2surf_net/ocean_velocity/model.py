@@ -130,9 +130,11 @@ class MetadataMLP(nn.Module):
         return self.layers(metadata)
 
 
-class UNet(nn.Module):
-    """Four-level U-Net mapping ``[B, C_in, H, W]`` to ``[B, C_out, H, W]``.
+class Waves2SurfNet(nn.Module):
+    """Waves2surfF model mapping ``[B, C_in, H, W]`` to ``[B, C_out, H, W]``.
 
+    The backbone is a four-level U-Net, while the project-specific public name
+    leaves room for the conditioning and loss variants developed here.
     ``base_channels=8`` is the recommended lightweight default. Group
     normalization is robust to the small per-device batches common in
     high-resolution geophysical training.
@@ -278,3 +280,8 @@ class UNet(nn.Module):
         y1 = self._modulate(7, self.up1(y2, x1), metadata)
         y0 = self._modulate(8, self.up0(y1, x0), metadata)
         return self.head(y0)
+
+
+# Backward compatibility for early notebooks and checkpoints that imported the
+# architecture as ``UNet``. New code should use the project name above.
+UNet = Waves2SurfNet
