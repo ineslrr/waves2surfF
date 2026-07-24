@@ -1,0 +1,55 @@
+{
+  "data": {
+    "path": "/path/to/ocean_fields.nc",
+    "input_variables": ["ssh", "wind_u", "wind_v"],
+    "metadata_variables": ["background_temperature"],
+    "target_variables": ["surface_u", "surface_v"],
+    "time_variable": "time",
+    "calendar_features": ["year_sin", "year_cos"],
+    "valid_mask_variable": "ocean_mask",
+    "spatial_slice": null,
+    "dx": 10000.0,
+    "dy": 10000.0,
+    "splits": {
+      "train": [0, 1, 2, 3],
+      "validation": [4],
+      "test": [5]
+    },
+    "normalization": {
+      "input": {
+        "mean": [0.0, 0.0, 0.0],
+        "std": [0.2, 5.0, 5.0]
+      },
+      "metadata": {
+        "mean": [15.0, 0.0, 0.0],
+        "std": [5.0, 0.7071, 0.7071]
+      },
+      "target": {
+        "mean": [0.0, 0.0],
+        "std": [0.5, 0.5]
+      }
+    }
+  },
+  "model": {
+    "base_channels": 8,
+    "normalization": "group",
+    "conditioning": "broadcast",
+    "metadata_channels": 4,
+    "metadata_width": 32
+  },
+  "training": {
+    "device": "cuda",
+    "epochs": 50,
+    "batch_size": 16,
+    "num_workers": 4,
+    "learning_rate": 0.001,
+    "weight_decay": 0.00001,
+    "gradient_clip": 1.0,
+    "seed": 42,
+    "loss_weights": {
+      "pointwise": 1.0,
+      "spectral": 0.0,
+      "gradient": 0.0
+    }
+  }
+}

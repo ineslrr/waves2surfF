@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocean-velocity-unet"
+version = "0.1.0"
+description = "Lightweight 2-D U-Net for mapping ocean surface fields to velocity"
+requires-python = ">=3.10"
+dependencies = [
+  "netCDF4>=1.6",
+  "numpy>=1.24",
+  "torch>=2.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["ocean_velocity*"]
