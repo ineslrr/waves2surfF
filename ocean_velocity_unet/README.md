@@ -1,4 +1,4 @@
-# Ocean surface velocity U-Net
+# Waves2surfF
 
 A small, portable PyTorch project for learning
 
