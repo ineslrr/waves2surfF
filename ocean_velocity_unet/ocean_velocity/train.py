@@ -1,4 +1,9 @@
-"""Training and evaluation for the generalized 2-D velocity model."""
+"""Assemble datasets/model/losses and run optimization or evaluation.
+
+This module is the pipeline coordinator. Specialized details remain in
+``data.py``, ``model.py``, ``losses.py``, and ``metrics.py``; the functions
+here connect those pieces using one experiment configuration.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +23,12 @@ from .model import UNet
 
 
 def seed_everything(seed: int) -> None:
+    """Seed common random-number generators for more reproducible comparisons.
+
+    Exact bitwise reproducibility can still depend on hardware and PyTorch
+    kernels, but fixed seeds keep data shuffling and initialization controlled
+    across most runs.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -26,11 +37,18 @@ def seed_everything(seed: int) -> None:
 
 
 def _stats(config: dict[str, Any], name: str) -> ChannelStats | None:
+    """Extract one optional normalization group from the data configuration."""
     value = config["data"].get("normalization", {}).get(name)
     return ChannelStats.from_dict(value) if value else None
 
 
 def make_dataset(config: dict[str, Any], split: str) -> NetCDFFieldDataset:
+    """Build a dataset for ``train``, ``validation``, or ``test``.
+
+    All splits share variables and normalization; only their time indices
+    differ. Index lists may live directly in JSON or in ``.npy`` files when
+    they are too large for a readable configuration.
+    """
     data = config["data"]
     split_value = data["splits"][split]
     if isinstance(split_value, str):
@@ -54,8 +72,11 @@ def make_dataset(config: dict[str, Any], split: str) -> NetCDFFieldDataset:
 
 
 def make_model(config: dict[str, Any]) -> UNet:
+    """Construct a U-Net whose channel counts match the configured variables."""
     data = config["data"]
     model = config["model"]
+    # File-based metadata and derived calendar values are concatenated by the
+    # dataset into one vector in this exact order.
     metadata_dim = len(data.get("metadata_variables", [])) + len(
         data.get("calendar_features", [])
     )
@@ -77,6 +98,11 @@ def _loss(
     mask: torch.Tensor,
     config: dict[str, Any],
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    """Build the weighted differentiable objective for one mini-batch.
+
+    Pointwise L1 is always calculated. More expensive scientific auxiliaries
+    are calculated only when assigned nonzero weights.
+    """
     weights = config["training"].get("loss_weights", {"pointwise": 1.0})
     pieces = {"pointwise": masked_l1(prediction, target, mask)}
     if weights.get("spectral", 0):
@@ -89,11 +115,21 @@ def _loss(
             config["data"].get("dx", 1.0),
             config["data"].get("dy", 1.0),
         )
+    # ``total`` drives backpropagation; detached scalar pieces are useful for
+    # human-readable logging and debugging.
     total = sum(weights.get(name, 0.0) * value for name, value in pieces.items())
     return total, {name: value.item() for name, value in pieces.items()}
 
 
 def evaluate(model, loader, device, config) -> dict[str, Any]:
+    """Evaluate one complete split without updating model parameters.
+
+    Loss remains in normalized training space for checkpoint selection.
+    RMSE/MAE/R² are converted back to physical target units so reported values
+    are scientifically interpretable.
+    """
+    # eval() changes layers such as BatchNorm; no_grad() below also avoids
+    # storing activations needed only for backpropagation.
     model.eval()
     metrics = RegressionMetrics(len(config["data"]["target_variables"]))
     loss_sum = 0.0
@@ -108,6 +144,8 @@ def evaluate(model, loader, device, config) -> dict[str, Any]:
             loss, _ = _loss(prediction, y, mask, config)
             loss_sum += loss.item()
             batches += 1
+            # Undo target standardization for user-facing metrics. This affine
+            # transformation is applied equally to prediction and truth.
             target_stats = _stats(config, "target")
             if target_stats:
                 mean = torch.tensor(
@@ -125,11 +163,20 @@ def evaluate(model, loader, device, config) -> dict[str, Any]:
 
 
 def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
+    """Run the complete train/validate/checkpoint loop.
+
+    Each epoch performs gradient-based updates on the training split, evaluates
+    the untouched validation split, and saves the best validation checkpoint.
+    The test split is intentionally absent here and is evaluated separately
+    with ``evaluate.py`` after model selection.
+    """
     training = config["training"]
     seed_everything(int(training.get("seed", 42)))
     device = torch.device(
         training.get("device", "cuda" if torch.cuda.is_available() else "cpu")
     )
+    # Every experiment gets a self-contained output directory. Saving the
+    # resolved config first records the intended setup even if a job stops.
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(output_dir / "config.json", "w") as handle:
@@ -137,6 +184,8 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
 
     train_dataset = make_dataset(config, "train")
     validation_dataset = make_dataset(config, "validation")
+    # Pinned host memory and non-blocking transfers improve GPU input throughput.
+    # Persistent workers avoid reopening NetCDF files every epoch.
     loader_options = {
         "batch_size": training["batch_size"],
         "num_workers": training.get("num_workers", 4),
@@ -148,15 +197,20 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
 
     model = make_model(config).to(device)
     if training.get("initialize_from"):
+        # Weight-only initialization supports a second loss stage while giving
+        # the new objective a fresh optimizer and learning-rate schedule.
         initial = torch.load(
             training["initialize_from"], map_location=device, weights_only=False
         )
         model.load_state_dict(initial["model"])
+    # AdamW is a robust default for convolutional networks; weight decay mildly
+    # regularizes parameters independently of the adaptive gradient update.
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=training["learning_rate"],
         weight_decay=training.get("weight_decay", 1e-5),
     )
+    # Smoothly lower the learning rate so late epochs make finer updates.
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=training["epochs"]
     )
@@ -164,6 +218,7 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
     best_loss = float("inf")
     history = []
     for epoch in range(1, training["epochs"] + 1):
+        # train() enables training-time layer behavior and gradient tracking.
         model.train()
         train_loss = 0.0
         batches = 0
@@ -172,11 +227,15 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
             y = batch["y"].to(device, non_blocking=True)
             metadata = batch["metadata"].to(device, non_blocking=True)
             mask = batch["valid_mask"].to(device, non_blocking=True)
+            # Standard PyTorch update: clear old gradients, predict, measure
+            # error, backpropagate derivatives, then change parameters.
             optimizer.zero_grad(set_to_none=True)
             prediction = model(x, metadata)
             loss, _ = _loss(prediction, y, mask, config)
             loss.backward()
             if training.get("gradient_clip"):
+                # Clipping guards against occasional unstable, very large
+                # updates, especially when auxiliary losses are introduced.
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), training["gradient_clip"]
                 )
@@ -185,6 +244,7 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
             batches += 1
         scheduler.step()
 
+        # Validation happens after the epoch and never calls optimizer.step().
         validation = evaluate(model, validation_loader, device, config)
         record = {
             "epoch": epoch,
@@ -195,6 +255,8 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
         history.append(record)
         print(json.dumps(record))
         if validation["loss"] < best_loss:
+            # Selection by validation—not test—loss avoids optimistic test
+            # estimates. Save optimizer state so this checkpoint can be resumed.
             best_loss = validation["loss"]
             torch.save(
                 {
@@ -206,9 +268,12 @@ def run_training(config: dict[str, Any], output_dir: str | Path) -> None:
                 },
                 output_dir / "best.pt",
             )
+        # Rewrite a small history file each epoch so external jobs can monitor
+        # progress and interrupted runs retain all completed records.
         with open(output_dir / "history.json", "w") as handle:
             json.dump(history, handle, indent=2)
 
+    # ``last.pt`` is useful for diagnostics even when an earlier epoch was best.
     torch.save(
         {"model": model.state_dict(), "epoch": training["epochs"], "config": config},
         output_dir / "last.pt",

@@ -1,4 +1,10 @@
-"""A compact 2-D U-Net with interchangeable metadata conditioning."""
+"""Neural network used to map spatial ocean fields to surface velocity.
+
+The U-Net extracts features at several spatial scales and restores the input
+resolution through a decoder with skip connections. Global scalar metadata can
+be ignored, appended as input channels, compressed to four channels, or used
+to modulate intermediate features with FiLM.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +14,18 @@ from torch.nn import functional as F
 
 
 def _normalization(kind: str, channels: int) -> nn.Module:
+    """Construct the requested feature normalization layer.
+
+    GroupNorm is the default because it normalizes each sample independently
+    and remains stable when high-resolution fields force small GPU batches.
+    BatchNorm can be useful with large batches, while ``none`` supports an
+    explicit ablation.
+    """
     if kind == "batch":
         return nn.BatchNorm2d(channels)
     if kind == "group":
+        # GroupNorm requires the channel count to be divisible by the number
+        # of groups. Choose the largest valid value no greater than eight.
         groups = min(8, channels)
         while channels % groups:
             groups -= 1
@@ -21,6 +36,11 @@ def _normalization(kind: str, channels: int) -> nn.Module:
 
 
 class DoubleConv(nn.Module):
+    """Two local feature-extraction layers used throughout the U-Net.
+
+    A stride of two on the first convolution downsamples encoder features.
+    Decoder blocks use stride one and therefore preserve spatial resolution.
+    """
     def __init__(
         self,
         in_channels: int,
@@ -42,10 +62,16 @@ class DoubleConv(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Transform a batch shaped ``[B,C,H,W]``."""
         return self.layers(x)
 
 
 class Up(nn.Module):
+    """Upsample a decoder feature and merge it with an encoder skip feature.
+
+    The skip connection restores fine spatial detail that would otherwise be
+    lost at the coarse U-Net bottleneck.
+    """
     def __init__(
         self, in_channels: int, skip_channels: int, out_channels: int, normalization: str
     ) -> None:
@@ -57,25 +83,40 @@ class Up(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        """Return a fused feature map at the skip connection's resolution."""
+        # Explicitly target the skip size, which also handles odd image sizes.
         x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
         return self.conv(torch.cat((skip, x), dim=1))
 
 
 class FeatureModulation(nn.Module):
-    """Residual FiLM: ``x * (1 + gamma(z)) + beta(z)``."""
+    """Residual FiLM: ``x * (1 + gamma(z)) + beta(z)``.
+
+    One metadata vector produces a scale and offset for every feature channel.
+    These values are broadcast over space, allowing global conditions such as
+    season or mean temperature to change how spatial features are interpreted.
+    """
 
     def __init__(self, metadata_width: int, channels: int) -> None:
         super().__init__()
         self.generator = nn.Linear(metadata_width, 2 * channels)
+        # Zero initialization gives gamma=beta=0 initially, so adding FiLM does
+        # not perturb the ordinary U-Net at the start of training.
         nn.init.zeros_(self.generator.weight)
         nn.init.zeros_(self.generator.bias)
 
     def forward(self, x: torch.Tensor, metadata: torch.Tensor) -> torch.Tensor:
+        """Modulate ``x[B,C,H,W]`` using encoded metadata ``[B,D]``."""
         gamma, beta = self.generator(metadata).chunk(2, dim=1)
         return x * (1 + gamma[:, :, None, None]) + beta[:, :, None, None]
 
 
 class MetadataMLP(nn.Module):
+    """Learn a compact nonlinear representation of global metadata.
+
+    The same small multilayer perceptron supports the four-channel broadcast
+    experiment and produces the shared embedding consumed by FiLM layers.
+    """
     def __init__(self, in_features: int, hidden_features: int, out_features: int):
         super().__init__()
         self.layers = nn.Sequential(
@@ -85,6 +126,7 @@ class MetadataMLP(nn.Module):
         )
 
     def forward(self, metadata: torch.Tensor) -> torch.Tensor:
+        """Encode a batch of metadata vectors shaped ``[B,D]``."""
         return self.layers(metadata)
 
 
@@ -94,6 +136,12 @@ class UNet(nn.Module):
     ``base_channels=8`` is the recommended lightweight default. Group
     normalization is robust to the small per-device batches common in
     high-resolution geophysical training.
+
+    Conditioning modes:
+        ``none`` ignores metadata.
+        ``extra_channels`` broadcasts every raw metadata value over the grid.
+        ``broadcast`` first compresses metadata to a fixed number of channels.
+        ``film`` modulates features throughout encoder and decoder.
     """
 
     def __init__(
@@ -107,6 +155,7 @@ class UNet(nn.Module):
         metadata_channels: int = 4,
         metadata_width: int = 32,
     ) -> None:
+        """Build the full network and the selected conditioning pathway."""
         super().__init__()
         valid_conditioning = {"none", "extra_channels", "broadcast", "film"}
         if conditioning not in valid_conditioning:
@@ -119,6 +168,9 @@ class UNet(nn.Module):
         self.metadata_dim = metadata_dim
         self.metadata_channels = metadata_channels
 
+        # Input-channel approaches change only the first convolution's width.
+        # FiLM instead keeps spatial inputs unchanged and creates an embedding
+        # used by lightweight modulation layers.
         if conditioning == "extra_channels":
             stem_channels = in_channels + metadata_dim
             self.metadata_encoder = nn.Identity()
@@ -135,6 +187,8 @@ class UNet(nn.Module):
                 else None
             )
 
+        # Deeper levels use more channels because their smaller feature maps
+        # can represent richer large-scale structure at moderate memory cost.
         widths = [base_channels * 2**i for i in range(4)]
         self.stem = DoubleConv(
             stem_channels, widths[0], normalization=normalization
@@ -155,6 +209,8 @@ class UNet(nn.Module):
         self.up2 = Up(widths[3], widths[2], widths[2], normalization)
         self.up1 = Up(widths[2], widths[1], widths[1], normalization)
         self.up0 = Up(widths[1], widths[0], widths[0], normalization)
+        # A 1x1 convolution maps learned features to u/v without mixing nearby
+        # pixels or imposing an output activation/range.
         self.head = nn.Conv2d(widths[0], out_channels, 1)
         if conditioning == "film":
             film_widths = [*widths, widths[3] * 2, *widths[::-1]]
@@ -167,6 +223,7 @@ class UNet(nn.Module):
 
     @staticmethod
     def _broadcast(metadata: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Expand ``[B,D]`` metadata into constant ``[B,D,H,W]`` maps."""
         return metadata[:, :, None, None].expand(
             -1, -1, x.shape[-2], x.shape[-1]
         )
@@ -174,6 +231,7 @@ class UNet(nn.Module):
     def _modulate(
         self, index: int, x: torch.Tensor, metadata: torch.Tensor | None
     ) -> torch.Tensor:
+        """Apply the indexed FiLM layer, or act as identity in other modes."""
         if self.film is None:
             return x
         return self.film[index](x, metadata)
@@ -181,6 +239,16 @@ class UNet(nn.Module):
     def forward(
         self, x: torch.Tensor, metadata: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Predict velocity from spatial fields and optional metadata.
+
+        Args:
+            x: Normalized spatial inputs ``[batch, input_channels, height, width]``.
+            metadata: Normalized global values ``[batch, metadata_dim]``.
+
+        Returns:
+            Dense output fields ``[batch, output_channels, height, width]``.
+        """
+        # Both channel-based modes concatenate metadata before the U-Net stem.
         if self.conditioning in {"extra_channels", "broadcast"}:
             if metadata is None:
                 raise ValueError("Metadata tensor is required by the configured model")
@@ -191,6 +259,8 @@ class UNet(nn.Module):
                 raise ValueError("Metadata tensor is required by the configured model")
             metadata = self.metadata_encoder(metadata)
 
+        # Encoder: progressively reduce resolution to grow the receptive field.
+        # x0..x3 are retained as skip connections for the decoder.
         x0 = self.stem(x)
         x0 = self._modulate(0, x0, metadata)
         x1 = self.down1(x0)
@@ -201,6 +271,8 @@ class UNet(nn.Module):
         x3 = self._modulate(3, x3, metadata)
         x4 = self.bottleneck(x3)
         x4 = self._modulate(4, x4, metadata)
+        # Decoder: recover resolution while combining coarse context with the
+        # matching fine-resolution encoder features.
         y3 = self._modulate(5, self.up3(x4, x3), metadata)
         y2 = self._modulate(6, self.up2(y3, x2), metadata)
         y1 = self._modulate(7, self.up1(y2, x1), metadata)
