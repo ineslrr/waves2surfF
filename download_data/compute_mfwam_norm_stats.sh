@@ -9,13 +9,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATS_DIR="${STATS_DIR:-${SCRIPT_DIR}/../stats}"
 
 DATA_DIR="${DATA_DIR:-/home/datawork-WW3/PROJECT/AMPHITRITE/BASELINES/MFWAM}"
 START_DATE="${START_DATE:-20230101}"
-END_DATE="${END_DATE:-20231231}"
+END_DATE="${END_DATE:-20230102}"
 REGION="${REGION:-agulhas}"
-OUTPUT="${OUTPUT:-${SCRIPT_DIR}/mfwam_${REGION}_${START_DATE}_${END_DATE}_stats.json}"
+OUTPUT="${OUTPUT:-${STATS_DIR}/mfwam_${REGION}_${START_DATE}_${END_DATE}_stats.json}"
 STRIDE_DAYS="${STRIDE_DAYS:-1}"
+
+mkdir -p "${STATS_DIR}"
 
 echo "=== MFWAM norm stats ==="
 echo "Data   : ${DATA_DIR}"
