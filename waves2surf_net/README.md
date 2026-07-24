@@ -58,6 +58,11 @@ python train.py \
   --output-dir runs/baseline
 ```
 
+For an interactive, step-by-step introduction, open
+[notebooks/tutorial_data_and_training.ipynb](notebooks/tutorial_data_and_training.ipynb).
+It constructs datasets, splits, DataLoaders, the model, optimizer, and
+train/validation loops explicitly so each piece can be inspected or modified.
+
 The run directory contains:
 
 ```text
