@@ -32,9 +32,7 @@ import xarray as xr
 
 NAMED_REGIONS = {
     # lon_min, lon_max, lat_min, lat_max
-    "agulhas": (10.0, 50.0, -45.0, -25.0),
-    "gulfstream": (-80.0, -40.0, 25.0, 45.0),
-    "biscay": (-10.0, 0.0, 43.0, 50.0),
+    "agulhas": (10.0, 35.0, -45.0, -35.0),
     "california_current": (-145.0, -120.0, 30.0, 40.0),
 }
 
