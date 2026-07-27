@@ -12,6 +12,32 @@ input channels and metadata conditioning.
 
 ## Data
 
+Two loading modes are supported.
+
+### Dual folders (recommended for MFWAM + Mercator currents)
+
+Point `data.sources.waves.dir` and `data.sources.currents.dir` at daily trees
+shaped `{YYYY}/{MM}/{YYYYMMDD}.nc`, and set `"layout": "daily_tree"` on each
+source (see [configs/agulhas.json](configs/agulhas.json)). Different on-disk
+layouts use different loaders under `ocean_velocity/sources/` selected by
+`layout` (copy `sources/custom_template.py` and register a new name).
+
+Wave times are paired to the nearest current snapshot within
+`match_tolerance_hours` (default 3 h). Unpaired times are dropped. Grids must
+match after the bbox crop (no regrid in v1).
+
+```bash
+python calculate_statistics.py \
+  --config configs/agulhas.json \
+  --output normalization.json
+```
+
+Copy the resulting `input`, `metadata`, and `target` objects into
+`data.normalization`. Regional JSON from `download_data/compute_mfwam_norm_stats.py`
+is a separate prep tool and is **not** the training normalization format.
+
+### Single NetCDF (legacy)
+
 The baseline reader expects one NetCDF file with aligned variables. Inputs may
 be:
 
@@ -131,13 +157,16 @@ values such as mean wind, calendar encodings, or mean temperature belong in
 
 ```text
 ocean_velocity/
-  model.py       Waves2SurfNet architecture and U-Net building blocks
-  data.py        worker-safe NetCDF dataset
-  losses.py      masked, spectral, and derivative losses
-  metrics.py     streaming regression metrics
-  config.py      JSON configuration validation
-  train.py       training and validation loop
-  statistics.py  streaming training-set statistics
+  model.py         Waves2SurfNet architecture and U-Net building blocks
+  data.py          single-file NetCDF dataset
+  wavecurrentdataset.py  WaveCurrentDataset (pairs two DataSources)
+  daily_index.py   timestamp pairing / date-range splits
+  sources/         pluggable layout loaders (daily_tree, …)
+  losses.py        masked, spectral, and derivative losses
+  metrics.py       streaming regression metrics
+  config.py        JSON configuration validation
+  train.py         training and validation loop
+  statistics.py    streaming training-set statistics
 train.py         command-line entrypoint
 calculate_statistics.py
 evaluate.py
