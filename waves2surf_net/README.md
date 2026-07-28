@@ -98,6 +98,36 @@ best.pt         checkpoint selected by validation loss
 last.pt         final epoch
 ```
 
+## Conditional diffusion experiment
+
+A compact 2-D conditional EDM implementation lives in
+`ocean_velocity/diffusion_model.py` and `ocean_velocity/diffusion.py`. It
+generates surface-current fields conditioned on the normalized wave fields
+returned by the existing datasets. It intentionally has no calendar encoding,
+multi-frame representation, temporal attention, distributed-training
+dependency, or external diffusion package.
+
+Open `notebooks/conditional_diffusion.ipynb` for a notebook-sized workflow:
+construct the existing dataset and DataLoader, build the denoiser, take
+training steps, and draw an ensemble with the EDM sampler. The model still
+embeds diffusion noise level `sigma`; this is required by diffusion and is
+unrelated to physical observation time.
+
+The main interactive API is:
+
+```python
+from ocean_velocity import (
+    ConditionalDiffusionUNet, EDMPreconditioner, edm_loss, edm_sample
+)
+
+backbone = ConditionalDiffusionUNet(
+    target_channels=2, condition_channels=3, base_channels=16
+)
+model = EDMPreconditioner(backbone, sigma_data=1.0).to(device)
+loss = edm_loss(model, batch["y"], batch["x"], batch["valid_mask"])
+sample = edm_sample(model, batch["x"], num_steps=18)
+```
+
 Evaluate the selected checkpoint on the untouched test split:
 
 ```bash

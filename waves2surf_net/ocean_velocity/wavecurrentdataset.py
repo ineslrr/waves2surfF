@@ -36,6 +36,7 @@ class WaveCurrentDataset(Dataset):
         input_stats: ChannelStats | None = None,
         metadata_stats: ChannelStats | None = None,
         target_stats: ChannelStats | None = None,
+        patch_size: Sequence[int] | None = None,
     ) -> None:
         if not pairs:
             raise ValueError("WaveCurrentDataset received an empty sample list")
@@ -56,6 +57,15 @@ class WaveCurrentDataset(Dataset):
         self.input_stats = input_stats
         self.metadata_stats = metadata_stats
         self.target_stats = target_stats
+        if patch_size is None:
+            self.patch_size = None
+        else:
+            if len(patch_size) != 2:
+                raise ValueError("patch_size must contain [height, width]")
+            patch_height, patch_width = (int(value) for value in patch_size)
+            if patch_height <= 0 or patch_width <= 0:
+                raise ValueError("patch_size values must be positive")
+            self.patch_size = (patch_height, patch_width)
 
     @classmethod
     def from_config(
@@ -103,6 +113,11 @@ class WaveCurrentDataset(Dataset):
             input_stats=input_stats,
             metadata_stats=metadata_stats,
             target_stats=target_stats,
+            patch_size=(
+                data.get("patch_size")
+                if split in data.get("random_patch_splits", ["train"])
+                else None
+            ),
         )
 
     def __len__(self) -> int:
@@ -134,6 +149,33 @@ class WaveCurrentDataset(Dataset):
         if len(mean) != values.shape[0]:
             raise ValueError("Normalization statistics do not match channel count")
         return (values - mean) / np.maximum(std, 1e-8)
+
+    def _random_patch(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        valid: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Crop aligned fields to one random spatial window.
+
+        PyTorch seeds each DataLoader worker independently, so using its RNG
+        here produces varied crops across workers while remaining reproducible
+        when the loader's generator/worker seeds are fixed.
+        """
+        if self.patch_size is None:
+            return x, y, valid
+        patch_height, patch_width = self.patch_size
+        height, width = x.shape[-2:]
+        if patch_height > height or patch_width > width:
+            raise ValueError(
+                f"patch_size {self.patch_size} exceeds sample shape "
+                f"{(height, width)}"
+            )
+        top = int(torch.randint(height - patch_height + 1, ()).item())
+        left = int(torch.randint(width - patch_width + 1, ()).item())
+        ys = slice(top, top + patch_height)
+        xs = slice(left, left + patch_width)
+        return x[:, ys, xs], y[:, ys, xs], valid[ys, xs]
 
     def __getitem__(self, item: int) -> dict[str, torch.Tensor]:
         pair = self.pairs[item]
@@ -167,6 +209,7 @@ class WaveCurrentDataset(Dataset):
             )
             valid &= np.isfinite(supplied) & (supplied > 0)
 
+        x_raw, y_raw, valid = self._random_patch(x_raw, y_raw, valid)
         x = self._normalize(np.nan_to_num(x_raw), self.input_stats)
         y = self._normalize(np.nan_to_num(y_raw), self.target_stats)
         if metadata_raw.size:

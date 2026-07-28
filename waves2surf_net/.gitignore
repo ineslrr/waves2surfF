@@ -7,6 +7,7 @@ build/
 dist/
 *.egg-info/
 runs/
+outputs/
 checkpoints/
 *.pt
 *.pth

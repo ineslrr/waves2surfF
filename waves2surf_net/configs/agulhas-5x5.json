@@ -24,7 +24,7 @@
       "lat_max": -35.0
     },
     "match_tolerance_hours": 3.0,
-    "patch_size": [48, 48],
+    "patch_size": [60, 60],
     "random_patch_splits": ["train"],
     "dx": 10000.0,
     "dy": 10000.0,
@@ -35,7 +35,7 @@
     },
     "normalization": {
       "input": {
-        "mean": [3.607, 9.904, 238.616], 
+        "mean": [3.607, 9.904, 238.616],
         "std": [1.311, 1.360, 46.097]
       },
       "metadata": {
