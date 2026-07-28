@@ -11,7 +11,11 @@ from torch.utils.data import Dataset
 
 from .daily_index import SamplePair, build_split_pairs
 from .data import ChannelStats
+from .direction import vmdr_to_kx_ky
 from .sources import DataSource, get_source
+
+# Derived from MFWAM VMDR; not present as NetCDF variables.
+DERIVED_INPUT_CHANNELS = frozenset({"KX", "KY"})
 
 
 class WaveCurrentDataset(Dataset):
@@ -19,6 +23,10 @@ class WaveCurrentDataset(Dataset):
 
     Layout-specific path discovery and field I/O live in
     ``ocean_velocity.sources`` (selected by ``sources.*.layout`` in JSON).
+
+    ``input_variables`` may include derived channels ``KX`` / ``KY`` (unit wave
+    propagation in the trigonometric frame of ``uo``/``vo``). Those require
+    ``VMDR`` in ``sources.waves.variables`` (or among the other input names).
     """
 
     def __init__(
@@ -108,6 +116,41 @@ class WaveCurrentDataset(Dataset):
     def __len__(self) -> int:
         return len(self.pairs)
 
+    def _wave_file_variables(self) -> tuple[str, ...]:
+        """NetCDF names that must be read to build ``input_variables``."""
+        names: list[str] = []
+        needs_vmdr = False
+        for name in self.input_variables:
+            if name in DERIVED_INPUT_CHANNELS:
+                needs_vmdr = True
+            elif name not in names:
+                names.append(name)
+        if needs_vmdr and "VMDR" not in names:
+            names.append("VMDR")
+        return tuple(names)
+
+    def _assemble_inputs(
+        self, fields: dict[str, np.ndarray]
+    ) -> list[np.ndarray]:
+        """Map file fields to configured input channels (with KX/KY derived)."""
+        kx = ky = None
+        if any(name in DERIVED_INPUT_CHANNELS for name in self.input_variables):
+            if "VMDR" not in fields:
+                raise KeyError(
+                    "Derived inputs KX/KY require VMDR; add it to "
+                    "sources.waves.variables (it need not stay in input_variables)"
+                )
+            kx, ky = vmdr_to_kx_ky(fields["VMDR"])
+        channels: list[np.ndarray] = []
+        for name in self.input_variables:
+            if name == "KX":
+                channels.append(kx)
+            elif name == "KY":
+                channels.append(ky)
+            else:
+                channels.append(fields[name])
+        return channels
+
     def _calendar_values(self, when: datetime) -> list[float]:
         if not self.calendar_features:
             return []
@@ -141,10 +184,11 @@ class WaveCurrentDataset(Dataset):
             self.current_source.read_field(pair.current, name, self.bbox)
             for name in self.target_variables
         ]
-        inputs = [
-            self.wave_source.read_field(pair.wave, name, self.bbox)
-            for name in self.input_variables
-        ]
+        wave_fields = {
+            name: self.wave_source.read_field(pair.wave, name, self.bbox)
+            for name in self._wave_file_variables()
+        }
+        inputs = self._assemble_inputs(wave_fields)
         if inputs[0].shape != targets[0].shape:
             raise ValueError(
                 "Wave and current spatial shapes differ after bbox crop: "

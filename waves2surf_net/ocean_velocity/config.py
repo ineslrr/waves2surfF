@@ -104,6 +104,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise ValueError(
             f"model.conditioning must be one of {sorted(valid_conditioning)}"
         )
+    depth = config["model"].get("depth", 4)
+    if not isinstance(depth, int) or depth < 1:
+        raise ValueError("model.depth must be an integer >= 1")
     metadata_dim = len(data.get("metadata_variables", [])) + len(
         data.get("calendar_features", [])
     )

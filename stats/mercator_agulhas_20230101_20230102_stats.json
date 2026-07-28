@@ -1,0 +1,37 @@
+{
+  "data_dir": "/home/datawork-WW3/FORCING/MERCA_GLOB_PHY_FOR/NC4",
+  "file_pattern": "cur_{year}.nc",
+  "start_date": "20230101",
+  "end_date": "20230102",
+  "stride_hours": 3,
+  "depth_index": 0,
+  "bbox": {
+    "lon_min": 10.0,
+    "lon_max": 35.0,
+    "lat_min": -45.0,
+    "lat_max": -35.0,
+    "region": "agulhas"
+  },
+  "n_files": 1,
+  "n_times": 16,
+  "variables": {
+    "uo": {
+      "mean": 0.04897066214106817,
+      "std": 0.43118399897624193,
+      "n": 582736
+    },
+    "vo": {
+      "mean": -0.002607341234388299,
+      "std": 0.4583463403233003,
+      "n": 582736
+    }
+  },
+  "means": {
+    "uo": 0.04897066214106817,
+    "vo": -0.002607341234388299
+  },
+  "stds": {
+    "uo": 0.43118399897624193,
+    "vo": 0.4583463403233003
+  }
+}

@@ -105,6 +105,7 @@ def make_model(config: dict[str, Any]) -> Waves2SurfNet:
         conditioning=model.get("conditioning", "none"),
         metadata_channels=model.get("metadata_channels", 4),
         metadata_width=model.get("metadata_width", 32),
+        depth=int(model.get("depth", 4)),
     )
 
 

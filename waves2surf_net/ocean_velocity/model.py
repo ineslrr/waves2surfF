@@ -133,11 +133,11 @@ class MetadataMLP(nn.Module):
 class Waves2SurfNet(nn.Module):
     """Waves2surfF model mapping ``[B, C_in, H, W]`` to ``[B, C_out, H, W]``.
 
-    The backbone is a four-level U-Net, while the project-specific public name
-    leaves room for the conditioning and loss variants developed here.
-    ``base_channels=8`` is the recommended lightweight default. Group
-    normalization is robust to the small per-device batches common in
-    high-resolution geophysical training.
+    The backbone is a U-Net with a configurable number of stride-2 downsampling
+    stages (``depth``). The default ``depth=4`` matches the original four-level
+    network (resolution ÷16 at the bottleneck). ``base_channels=8`` is the
+    recommended lightweight default. Group normalization is robust to the small
+    per-device batches common in high-resolution geophysical training.
 
     Conditioning modes:
         ``none`` ignores metadata.
@@ -156,9 +156,18 @@ class Waves2SurfNet(nn.Module):
         conditioning: str = "none",
         metadata_channels: int = 4,
         metadata_width: int = 32,
+        depth: int = 4,
     ) -> None:
-        """Build the full network and the selected conditioning pathway."""
+        """Build the full network and the selected conditioning pathway.
+
+        Args:
+            depth: Number of stride-2 stages (encoder downs + bottleneck).
+                ``depth=4`` is the historical default; ``depth=2`` is a
+                shallower U-Net (resolution ÷4 at the bottleneck).
+        """
         super().__init__()
+        if depth < 1:
+            raise ValueError(f"model depth must be >= 1, got {depth}")
         valid_conditioning = {"none", "extra_channels", "broadcast", "film"}
         if conditioning not in valid_conditioning:
             raise ValueError(
@@ -169,6 +178,7 @@ class Waves2SurfNet(nn.Module):
         self.conditioning = conditioning
         self.metadata_dim = metadata_dim
         self.metadata_channels = metadata_channels
+        self.depth = depth
 
         # Input-channel approaches change only the first convolution's width.
         # FiLM instead keeps spatial inputs unchanged and creates an embedding
@@ -191,31 +201,37 @@ class Waves2SurfNet(nn.Module):
 
         # Deeper levels use more channels because their smaller feature maps
         # can represent richer large-scale structure at moderate memory cost.
-        widths = [base_channels * 2**i for i in range(4)]
+        # ``widths`` has one entry per skip level (stem + intermediate downs).
+        widths = [base_channels * 2**i for i in range(depth)]
+        bottleneck_channels = widths[-1] * 2
         self.stem = DoubleConv(
             stem_channels, widths[0], normalization=normalization
         )
-        self.down1 = DoubleConv(
-            widths[0], widths[1], stride=2, normalization=normalization
-        )
-        self.down2 = DoubleConv(
-            widths[1], widths[2], stride=2, normalization=normalization
-        )
-        self.down3 = DoubleConv(
-            widths[2], widths[3], stride=2, normalization=normalization
+        # Intermediate encoder downs (stride 2). The final coarsening is the
+        # bottleneck below, so together they provide ``depth`` downsamplings.
+        self.downs = nn.ModuleList(
+            DoubleConv(
+                widths[i], widths[i + 1], stride=2, normalization=normalization
+            )
+            for i in range(depth - 1)
         )
         self.bottleneck = DoubleConv(
-            widths[3], widths[3] * 2, stride=2, normalization=normalization
+            widths[-1], bottleneck_channels, stride=2, normalization=normalization
         )
-        self.up3 = Up(widths[3] * 2, widths[3], widths[3], normalization)
-        self.up2 = Up(widths[3], widths[2], widths[2], normalization)
-        self.up1 = Up(widths[2], widths[1], widths[1], normalization)
-        self.up0 = Up(widths[1], widths[0], widths[0], normalization)
+        # Decoder: first fuse bottleneck with the coarsest skip, then walk back
+        # toward full resolution.
+        ups: list[nn.Module] = [
+            Up(bottleneck_channels, widths[-1], widths[-1], normalization)
+        ]
+        for i in range(depth - 2, -1, -1):
+            ups.append(Up(widths[i + 1], widths[i], widths[i], normalization))
+        self.ups = nn.ModuleList(ups)
         # A 1x1 convolution maps learned features to u/v without mixing nearby
         # pixels or imposing an output activation/range.
         self.head = nn.Conv2d(widths[0], out_channels, 1)
         if conditioning == "film":
-            film_widths = [*widths, widths[3] * 2, *widths[::-1]]
+            # FiLM on: stem, each down output, bottleneck, each up output.
+            film_widths = [*widths, bottleneck_channels, *widths[::-1]]
             self.film = nn.ModuleList(
                 FeatureModulation(metadata_width, channels)
                 for channels in film_widths
@@ -262,24 +278,20 @@ class Waves2SurfNet(nn.Module):
             metadata = self.metadata_encoder(metadata)
 
         # Encoder: progressively reduce resolution to grow the receptive field.
-        # x0..x3 are retained as skip connections for the decoder.
-        x0 = self.stem(x)
-        x0 = self._modulate(0, x0, metadata)
-        x1 = self.down1(x0)
-        x1 = self._modulate(1, x1, metadata)
-        x2 = self.down2(x1)
-        x2 = self._modulate(2, x2, metadata)
-        x3 = self.down3(x2)
-        x3 = self._modulate(3, x3, metadata)
-        x4 = self.bottleneck(x3)
-        x4 = self._modulate(4, x4, metadata)
+        # ``skips`` retains stem + intermediate features for the decoder.
+        skips: list[torch.Tensor] = []
+        h = self._modulate(0, self.stem(x), metadata)
+        skips.append(h)
+        for i, down in enumerate(self.downs):
+            h = self._modulate(i + 1, down(h), metadata)
+            skips.append(h)
+        h = self._modulate(self.depth, self.bottleneck(h), metadata)
         # Decoder: recover resolution while combining coarse context with the
         # matching fine-resolution encoder features.
-        y3 = self._modulate(5, self.up3(x4, x3), metadata)
-        y2 = self._modulate(6, self.up2(y3, x2), metadata)
-        y1 = self._modulate(7, self.up1(y2, x1), metadata)
-        y0 = self._modulate(8, self.up0(y1, x0), metadata)
-        return self.head(y0)
+        for j, up in enumerate(self.ups):
+            skip = skips[-(j + 1)]
+            h = self._modulate(self.depth + 1 + j, up(h, skip), metadata)
+        return self.head(h)
 
 
 # Backward compatibility for early notebooks and checkpoints that imported the

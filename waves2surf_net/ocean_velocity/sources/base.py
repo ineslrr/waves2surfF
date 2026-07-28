@@ -39,6 +39,19 @@ def list_layouts() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def ensure_south_to_north(field: np.ndarray, latitudes: np.ndarray) -> np.ndarray:
+    """Flip the latitude axis when coordinates decrease with row index.
+
+    Many CMEMS / Mercator files store latitude north→south. Training tensors
+    and ``imshow(..., origin="lower", extent=[..., lat_min, lat_max])`` expect
+    south→north (row 0 at ``lat_min``).
+    """
+    latitudes = np.asarray(latitudes)
+    if latitudes.size > 1 and float(latitudes[0]) > float(latitudes[-1]):
+        return np.ascontiguousarray(np.flip(field, axis=0))
+    return field
+
+
 class DataSource(ABC):
     """One on-disk product layout (waves, currents, …).
 

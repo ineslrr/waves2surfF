@@ -16,9 +16,9 @@
         "depth_index": 0
       }
     },
-    "input_variables": ["VHM0", "VTM10", "VMDR"],
+    "input_variables": ["VHM0", "KX", "KY", "VTM10"],
     "target_variables": ["uo", "vo"],
-    "calendar_features": ["year_sin", "year_cos"],
+    "calendar_features": [],
     "bbox": {
       "lon_min": 10.0,
       "lon_max": 35.0,
@@ -35,23 +35,19 @@
     },
     "normalization": {
       "input": {
-        "mean": [3.607, 9.904, 238.616], 
-        "std": [1.311, 1.360, 46.097]
-      },
-      "metadata": {
-        "mean": [0.0, 0.0],
-        "std": [0.7071, 0.7071]
+        "mean": [3.6078, 0.6177, 0.3768, 9.9048],
+        "std": [1.3120, 0.4893, 0.4870, 1.3607]
       },
       "target": {
-        "mean": [ 0.0703, 0.0129],
-        "std": [0.3881, 0.37781]
+        "mean": [0.0704, 0.0129],
+        "std": [0.3882, 0.3778]
       }
     }
   },
   "model": {
     "base_channels": 8,
     "normalization": "group",
-    "conditioning": "broadcast",
+    "conditioning": "none",
     "metadata_channels": 4,
     "metadata_width": 32
   },

@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from ..daily_index import TimeStampRef, _to_python_datetime
-from .base import DataSource
+from .base import DataSource, ensure_south_to_north
 
 
 class YearlyNetCDFSource(DataSource):
@@ -195,4 +195,7 @@ class YearlyNetCDFSource(DataSource):
                 f"Variable {variable!r} in {ref.path} has unsupported "
                 f"ndim={var.ndim}"
             )
-        return np.asarray(np.ma.filled(value, np.nan), dtype=np.float32)
+        value = np.asarray(np.ma.filled(value, np.nan), dtype=np.float32)
+        lat_name, _ = self._lat_lon_names(ds)
+        lats = np.asarray(ds.variables[lat_name][ys], dtype=np.float64)
+        return ensure_south_to_north(value, lats)
