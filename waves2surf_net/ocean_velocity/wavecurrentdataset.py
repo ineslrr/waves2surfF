@@ -28,6 +28,7 @@ class WaveCurrentDataset(Dataset):
     propagation in the trigonometric frame of ``uo``/``vo``). Those require
     ``VMDR`` in ``sources.waves.variables`` (or among the other input names).
     """
+    DERIVED_VARIABLES = {"KX", "KY"} # adding flexibility to derive new input fields ---> see read_wave_variable
 
     def __init__(
         self,
@@ -178,6 +179,38 @@ class WaveCurrentDataset(Dataset):
             raise ValueError("Normalization statistics do not match channel count")
         return (values - mean) / np.maximum(std, 1e-8)
 
+        
+    def _read_wave_variable(self, pair, name, cache):
+        # print("READ REQUEST:", repr(name))
+    
+        if name in cache:
+            return cache[name]
+    
+        if name in self.DERIVED_VARIABLES:
+            # print("COMPUTING DERIVED:", name)
+    
+            T = self._read_wave_variable(pair, "VTM10", cache)
+            theta = np.deg2rad(
+                self._read_wave_variable(pair, "VMDR", cache)
+            )
+    
+            L = 9.81 * T**2 / (2 * np.pi)
+            k = 2 * np.pi / L
+    
+            cache["KX"] = k * np.cos(theta)
+            cache["KY"] = k * np.sin(theta)
+    
+            return cache[name]
+    
+        cache[name] = self.wave_source.read_field(
+            pair.wave,
+            name,
+            self.bbox,
+        )
+        return cache[name]
+
+
+    
     def __getitem__(self, item: int) -> dict[str, torch.Tensor]:
         pair = self.pairs[item]
         targets = [

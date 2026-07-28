@@ -44,7 +44,7 @@ python "${SCRIPT_DIR}/download_mfwam.py" \
     --end_date "${END_DATE}" \
     --output_dir "${OUTPUT_DIR}" \
     --download_dir "${DOWNLOAD_DIR}" \
-    --variables VHM0 VTM01 VMDR \
+    --variables VHM0 VTM10 VMDR \
     "${BBOX_ARGS[@]}" \
     --overwrite
 
