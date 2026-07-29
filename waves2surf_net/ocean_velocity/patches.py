@@ -147,6 +147,55 @@ def crop_sample(
     return out
 
 
+def apply_patches(
+    dataset: Dataset,
+    config: dict[str, Any],
+    split: str,
+) -> Dataset:
+    """Optionally wrap ``dataset`` with :class:`SpatialPatchDataset` from config.
+
+    Expected ``data.patches`` shape (notebook / experiment configs)::
+
+        {
+          "train": true,
+          "validation": true,
+          "test": false,
+          "size_deg": [5.0, 5.0],
+          "stride_deg": null,
+          "mode": "grid",
+          "random_patches_per_item": 1
+        }
+
+    If ``data.patches`` is missing, or the split flag is false, the base
+    dataset is returned unchanged.
+    """
+    patches = config.get("data", {}).get("patches")
+    if not patches:
+        return dataset
+    enabled = patches.get(split)
+    if enabled is None:
+        enabled = bool(patches.get("enabled", False))
+    if not enabled:
+        return dataset
+
+    bbox = config["data"].get("bbox")
+    if not bbox:
+        raise ValueError("data.patches requires data.bbox to infer grid resolution")
+
+    size_deg = patches.get("size_deg", [2.0, 3.0])
+    stride_raw = patches.get("stride_deg")
+    stride_deg = None if stride_raw in (None, [], ()) else tuple(stride_raw)
+    return SpatialPatchDataset.from_degrees(
+        dataset,
+        bbox,
+        size_deg=tuple(size_deg),
+        stride_deg=stride_deg,
+        mode=str(patches.get("mode", "grid")),
+        seed=int(config.get("training", {}).get("seed", 42)),
+        random_patches_per_item=int(patches.get("random_patches_per_item", 1)),
+    )
+
+
 class SpatialPatchDataset(Dataset):
     """Wrap a map-style dataset and expose spatial crops as extra samples.
 

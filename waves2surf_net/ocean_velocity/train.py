@@ -20,6 +20,7 @@ from .data import ChannelStats, NetCDFFieldDataset
 from .losses import gradient_loss, masked_l1, spectral_loss
 from .metrics import RegressionMetrics
 from .model import Waves2SurfNet
+from .patches import apply_patches
 from .wavecurrentdataset import WaveCurrentDataset
 
 
@@ -45,12 +46,15 @@ def _stats(config: dict[str, Any], name: str) -> ChannelStats | None:
 
 def make_dataset(
     config: dict[str, Any], split: str
-) -> NetCDFFieldDataset | WaveCurrentDataset:
+):
     """Build a dataset for ``train``, ``validation``, or ``test``.
 
     Dual-source configs (``data.sources``) use :class:`WaveCurrentDataset`
     with date-range splits. Single-file configs (``data.path``) keep the
     original :class:`NetCDFFieldDataset` and index-list / ``.npy`` splits.
+
+    Optional ``data.patches`` wraps the result in
+    :class:`~ocean_velocity.patches.SpatialPatchDataset`.
     """
     data = config["data"]
     input_stats = _stats(config, "input")
@@ -58,33 +62,34 @@ def make_dataset(
     target_stats = _stats(config, "target")
 
     if "sources" in data:
-        return WaveCurrentDataset.from_config(
+        dataset = WaveCurrentDataset.from_config(
             config,
             split,
             input_stats=input_stats,
             metadata_stats=metadata_stats,
             target_stats=target_stats,
         )
-
-    split_value = data["splits"][split]
-    if isinstance(split_value, str):
-        indices = np.load(split_value).tolist()
     else:
-        indices = split_value
-    return NetCDFFieldDataset(
-        data["path"],
-        data["input_variables"],
-        data["target_variables"],
-        indices,
-        metadata_variables=data.get("metadata_variables", []),
-        time_variable=data.get("time_variable", "time"),
-        calendar_features=data.get("calendar_features", []),
-        valid_mask_variable=data.get("valid_mask_variable"),
-        spatial_slice=data.get("spatial_slice"),
-        input_stats=input_stats,
-        metadata_stats=metadata_stats,
-        target_stats=target_stats,
-    )
+        split_value = data["splits"][split]
+        if isinstance(split_value, str):
+            indices = np.load(split_value).tolist()
+        else:
+            indices = split_value
+        dataset = NetCDFFieldDataset(
+            data["path"],
+            data["input_variables"],
+            data["target_variables"],
+            indices,
+            metadata_variables=data.get("metadata_variables", []),
+            time_variable=data.get("time_variable", "time"),
+            calendar_features=data.get("calendar_features", []),
+            valid_mask_variable=data.get("valid_mask_variable"),
+            spatial_slice=data.get("spatial_slice"),
+            input_stats=input_stats,
+            metadata_stats=metadata_stats,
+            target_stats=target_stats,
+        )
+    return apply_patches(dataset, config, split)
 
 
 def make_model(config: dict[str, Any]) -> Waves2SurfNet:

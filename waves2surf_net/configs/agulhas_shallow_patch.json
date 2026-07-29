@@ -1,0 +1,77 @@
+{
+  "data": {
+    "sources": {
+      "waves": {
+        "dir": "/home/datawork-WW3/PROJECT/AMPHITRITE/BASELINES/MFWAM",
+        "layout": "daily_tree",
+        "variables": ["VHM0", "VTM10", "VMDR"],
+        "time_variable": "time"
+      },
+      "currents": {
+        "dir": "/home/datawork-WW3/FORCING/MERCA_GLOB_PHY_FOR/NC4",
+        "layout": "yearly_nc",
+        "file_pattern": "cur_{year}.nc",
+        "variables": ["uo", "vo"],
+        "time_variable": "time",
+        "depth_index": 0
+      }
+    },
+    "input_variables": ["VHM0", "KX", "KY", "VTM10"],
+    "target_variables": ["uo", "vo"],
+    "calendar_features": [],
+    "bbox": {
+      "lon_min": 10.0,
+      "lon_max": 35.0,
+      "lat_min": -45.0,
+      "lat_max": -35.0
+    },
+    "match_tolerance_hours": 3.0,
+    "dx": 10000.0,
+    "dy": 10000.0,
+    "splits": {
+      "train": {"start": "20220101", "end": "20251231"},
+      "validation": {"start": "20260101", "end": "20261231"},
+      "test": {"start": "20260101", "end": "20261231"}
+    },
+    "patches": {
+      "train": true,
+      "validation": true,
+      "test": true,
+      "size_deg": [5.0, 5.0],
+      "stride_deg": null,
+      "mode": "grid",
+      "random_patches_per_item": 1
+    },
+    "normalization": {
+      "input": {
+        "mean": [3.6078, 0.6177, 0.3768, 9.9048],
+        "std": [1.3120, 0.4893, 0.4870, 1.3607]
+      },
+      "target": {
+        "mean": [0.0704, 0.0129],
+        "std": [0.3882, 0.3778]
+      }
+    }
+  },
+  "model": {
+    "base_channels": 8,
+    "normalization": "group",
+    "conditioning": "none",
+    "depth": 2
+  },
+  "training": {
+    "device": "cuda",
+    "epochs": 100,
+    "batch_size": 16,
+    "num_workers": 4,
+    "learning_rate": 0.001,
+    "weight_decay": 0.00001,
+    "gradient_clip": 1.0,
+    "seed": 42,
+    "loss_weights": {
+      "pointwise": 1.0,
+      "spectral": 0.0,
+      "gradient": 0.0
+    }
+  }
+}
